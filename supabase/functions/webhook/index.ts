@@ -1,55 +1,107 @@
-import { serve } from 'https://deno.land/std@0.177.0/http/server.ts'
-import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm'
+import { serve } from 'https://deno.fresh.dev/server.ts'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js'
 
-const supabaseUrl = Deno.env.get('SUPABASE_URL')!
-const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-const supabase = createClient(supabaseUrl, supabaseKey)
+const supabaseUrl = Deno.env.get('SUPABASE_URL')
+const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
 
-serve(async (req: Request) => {
+if (!supabaseUrl || !supabaseServiceKey) {
+  throw new Error('Missing Supabase environment variables')
+}
+
+const supabase = createClient(supabaseUrl, supabaseServiceKey)
+
+interface MidtransNotification {
+  transaction_status: string
+  order_id: string
+  gross_amount: string
+  payment_type: string
+}
+
+serve(async (req) => {
   try {
-    const body = await req.json()
+    if (req.method !== 'POST') {
+      return new Response('Method not allowed', { status: 405 })
+    }
 
-    // Validate Midtrans notification signature here if needed
+    const notification: MidtransNotification = await req.json()
+    const orderId = notification.order_id
+    const transactionStatus = notification.transaction_status
 
-    const transactionStatus = body.transaction_status
-    const orderId = body.order_id
-    const transactionId = body.transaction_id
-    const paymentType = body.payment_type
-    const transactionTime = body.transaction_time
-
-    // Update donation and transaction status in Supabase
-    // Assuming order_id maps to donation id
-    const { data: donation } = await supabase
-      .from('donations')
-      .select('id, status')
+    // Verify the payment in your database
+    const { data: payment, error: paymentError } = await supabase
+      .from('payments')
+      .select('*')
       .eq('id', orderId)
       .single()
 
-    if (!donation) {
-      return new Response('Donation not found', { status: 404 })
+    if (paymentError || !payment) {
+      throw new Error('Payment not found')
     }
 
-    let newStatus = donation.status
+    // Update payment status based on Midtrans notification
+    let status = 'pending'
     if (transactionStatus === 'capture' || transactionStatus === 'settlement') {
-      newStatus = 'paid'
+      status = 'completed'
     } else if (transactionStatus === 'deny' || transactionStatus === 'cancel' || transactionStatus === 'expire') {
-      newStatus = 'failed'
+      status = 'failed'
     }
 
-    await supabase.from('donations').update({ status: newStatus }).eq('id', orderId)
+    // Update payment status
+    const { error: updateError } = await supabase
+      .from('payments')
+      .update({ status })
+      .eq('id', orderId)
 
-    // Insert or update transaction record
-    await supabase.from('transactions').upsert({
-      donation_id: orderId,
-      midtrans_transaction_id: transactionId,
-      payment_method: paymentType,
-      payment_details: body,
-      transaction_time: new Date(transactionTime)
+    if (updateError) {
+      throw updateError
+    }
+
+    // If payment is completed, process rewards
+    if (status === 'completed') {
+      if (payment.type === 'points') {
+        // Update user points
+        const { data: user, error: userError } = await supabase
+          .from('users')
+          .select('total_points')
+          .eq('id', payment.user_id)
+          .single()
+
+        if (userError) {
+          throw userError
+        }
+
+        const newPoints = user.total_points + payment.points_amount
+        await supabase
+          .from('users')
+          .update({ total_points: newPoints })
+          .eq('id', payment.user_id)
+
+      } else if (payment.type === 'subscription') {
+        // Create subscription record
+        const startDate = new Date()
+        const endDate = new Date()
+        endDate.setMonth(endDate.getMonth() + payment.subscription_months)
+
+        await supabase
+          .from('subscriptions')
+          .insert([{
+            user_id: payment.user_id,
+            start_date: startDate.toISOString(),
+            end_date: endDate.toISOString()
+          }])
+      }
+    }
+
+    return new Response(JSON.stringify({ success: true }), {
+      headers: { 'Content-Type': 'application/json' },
+      status: 200
     })
 
-    return new Response('OK', { status: 200 })
   } catch (error) {
     console.error('Webhook error:', error)
-    return new Response('Error', { status: 500 })
+    return new Response(JSON.stringify({ error: error.message }), {
+      headers: { 'Content-Type': 'application/json' },
+      status: 500
+    })
   }
 })
