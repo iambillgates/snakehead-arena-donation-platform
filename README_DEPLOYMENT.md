@@ -1,57 +1,157 @@
-# Deployment Instructions for Snakehead Arena PvP Donation Platform
+# Snakehead Arena PvP - Deployment Guide
 
-## Frontend Deployment (Vue.js)
+This guide explains how to deploy and configure the Snakehead Arena PvP donation platform.
 
-1. Build the frontend project:
-   ```bash
-   npm run build
-   ```
+## Prerequisites
 
-2. Deploy the `dist` folder to Vercel:
-   - Create a new project on Vercel.
-   - Connect your GitHub repository or upload the project.
-   - Set environment variables:
-     - `VITE_MIDTRANS_CLIENT_KEY` (Midtrans Client Key)
-   - Deploy the project.
+1. Supabase Account
+2. Midtrans Account
+3. Node.js 16+ and npm
+4. Domain name (optional)
 
-3. After deployment, verify the site is accessible and the language switcher works.
+## Environment Variables
 
-## Backend Deployment (Supabase)
+Create a `.env` file in the `vue-frontend` directory:
 
-1. Create a Supabase project at https://app.supabase.com/.
+```env
+VITE_SUPABASE_URL=your_supabase_url
+VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
+VITE_MIDTRANS_CLIENT_KEY=your_midtrans_client_key
+VITE_MIDTRANS_SNAP_URL=https://app.sandbox.midtrans.com/snap/snap.js
+```
 
-2. Configure Authentication:
-   - Enable Discord and Google providers.
-   - Set redirect URLs to your frontend domain.
+## Database Setup
 
-3. Database Setup:
-   - Run the SQL schema in `supabase/schema.sql` in the Supabase SQL editor.
+1. Create a new Supabase project
+2. Run the SQL schema:
+   - Copy the contents of `supabase/schema.sql`
+   - Execute in Supabase SQL editor
 
-4. API Server:
-   - Deploy the Node.js API server (`supabase/functions/api.js`) to a hosting platform (e.g., Vercel, Heroku).
-   - Set environment variables:
-     - `SUPABASE_URL`
-     - `SUPABASE_SERVICE_ROLE_KEY`
-     - `PORT` (optional, default 3001)
+## Supabase Edge Functions
 
-5. Webhook Server:
-   - Deploy the webhook server (`supabase/functions/webhook/index.js`) similarly.
-   - Set environment variables as above.
-   - Configure Midtrans to send payment notifications to the webhook URL.
+1. Deploy the webhook function:
+```bash
+supabase functions deploy webhook
+```
 
-6. Update Frontend:
-   - Set API base URLs in frontend environment variables to point to your deployed API server.
+2. Set environment variables for the function:
+```bash
+supabase secrets set SUPABASE_URL=your_supabase_url
+supabase secrets set SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
+```
 
-## Environment Variables Summary
+## Midtrans Configuration
 
-- `VITE_MIDTRANS_CLIENT_KEY` - Midtrans Client Key for frontend Snap integration.
-- `SUPABASE_URL` - Supabase project URL.
-- `SUPABASE_SERVICE_ROLE_KEY` - Supabase service role key for backend API.
-- `PORT` - Port for backend servers (optional).
+1. Set up a Midtrans account
+2. Configure webhook URL in Midtrans dashboard:
+   - Point to your Supabase webhook function URL
+   - Format: `https://[project-ref].functions.supabase.co/webhook`
 
-## Additional Notes
+3. Configure payment methods:
+   - Enable desired payment methods in Midtrans dashboard
+   - Update notification URL
+   - Set allowed IPs if needed
 
-- Ensure CORS settings allow frontend to communicate with backend.
-- Secure your service role key; do not expose it in frontend code.
-- Test payment flows in Midtrans sandbox before going live.
-- Monitor logs for webhook and API servers for errors.
+## Frontend Deployment
+
+1. Install dependencies:
+```bash
+cd vue-frontend
+npm install
+```
+
+2. Build for production:
+```bash
+npm run build
+```
+
+3. Deploy the `dist` directory to your hosting service
+
+## Initial Setup
+
+1. Create admin user:
+```sql
+-- In Supabase SQL editor
+INSERT INTO public.users (id, email, name, role)
+VALUES (
+  'auth_user_id',
+  'admin@example.com',
+  'Admin User',
+  'admin'
+);
+```
+
+2. Configure authentication in Supabase:
+   - Enable Email auth provider
+   - Configure email templates
+   - Set up password policies
+
+## Security Considerations
+
+1. RLS Policies are configured in schema.sql
+2. Ensure Supabase service role key is kept secure
+3. Use HTTPS for all endpoints
+4. Configure CORS appropriately
+5. Monitor logs for suspicious activity
+
+## Testing
+
+1. Test user registration/login
+2. Test payment flow with Midtrans sandbox
+3. Verify webhook handling
+4. Check admin functions
+5. Verify point/subscription delivery
+
+## Monitoring
+
+1. Set up Supabase database monitoring
+2. Configure error logging
+3. Monitor webhook responses
+4. Track payment status changes
+
+## Troubleshooting
+
+Common issues and solutions:
+
+1. Payment webhook not received:
+   - Check Midtrans configuration
+   - Verify webhook URL
+   - Check function logs
+
+2. Points not credited:
+   - Check webhook function logs
+   - Verify database transactions
+   - Check user balance updates
+
+3. Authentication issues:
+   - Verify environment variables
+   - Check Supabase configuration
+   - Review auth logs
+
+## Maintenance
+
+Regular maintenance tasks:
+
+1. Update dependencies
+2. Monitor database performance
+3. Clean up old logs
+4. Backup database regularly
+5. Review security settings
+
+## Support
+
+For technical support:
+1. Check Supabase documentation
+2. Review Midtrans integration guides
+3. Contact support team
+
+## Scaling
+
+To handle increased load:
+
+1. Optimize database queries
+2. Add caching where appropriate
+3. Monitor resource usage
+4. Scale Supabase plan as needed
+
+Remember to regularly update this guide as the system evolves.
