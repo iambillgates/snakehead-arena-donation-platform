@@ -1,64 +1,122 @@
-const express = require('express')
-const bodyParser = require('body-parser')
-const { createClient } = require('@supabase/supabase-js')
+import { serve } from 'https://deno.land/std@0.177.0/http/server.js'
+import { createClient } from '@supabase/supabase-js'
 
-const app = express()
-app.use(bodyParser.json())
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+}
 
-const supabaseUrl = process.env.SUPABASE_URL
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY
-const supabase = createClient(supabaseUrl, supabaseKey)
-
-app.post('/webhook', async (req, res) => {
+serve(async (req) => {
   try {
-    const body = req.body
+    // Handle CORS preflight requests
+    if (req.method === 'OPTIONS') {
+      return new Response('ok', { headers: corsHeaders })
+    }
 
-    // Validate Midtrans notification signature here if needed
+    if (req.method !== 'POST') {
+      return new Response('Method not allowed', { 
+        status: 405,
+        headers: { ...corsHeaders }
+      })
+    }
 
-    const transactionStatus = body.transaction_status
-    const orderId = body.order_id
-    const transactionId = body.transaction_id
-    const paymentType = body.payment_type
-    const transactionTime = body.transaction_time
+    const supabaseClient = createClient(
+      Deno.env.get('SUPABASE_URL') ?? '',
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
+      {
+        auth: {
+          autoRefreshToken: false,
+          persistSession: false
+        }
+      }
+    )
 
-    // Update donation and transaction status in Supabase
-    // Assuming order_id maps to donation id
-    const { data: donation } = await supabase
-      .from('donations')
-      .select('id, status')
+    const notification = await req.json()
+    const orderId = notification.order_id
+    const transactionStatus = notification.transaction_status
+
+    // Verify the payment in your database
+    const { data: payment, error: paymentError } = await supabaseClient
+      .from('payments')
+      .select('*')
       .eq('id', orderId)
       .single()
 
-    if (!donation) {
-      return res.status(404).send('Donation not found')
+    if (paymentError || !payment) {
+      throw new Error('Payment not found')
     }
 
-    let newStatus = donation.status
+    // Update payment status based on Midtrans notification
+    let status = 'pending'
     if (transactionStatus === 'capture' || transactionStatus === 'settlement') {
-      newStatus = 'paid'
+      status = 'completed'
     } else if (transactionStatus === 'deny' || transactionStatus === 'cancel' || transactionStatus === 'expire') {
-      newStatus = 'failed'
+      status = 'failed'
     }
 
-    await supabase.from('donations').update({ status: newStatus }).eq('id', orderId)
+    // Update payment status
+    const { error: updateError } = await supabaseClient
+      .from('payments')
+      .update({ status })
+      .eq('id', orderId)
 
-    // Insert or update transaction record
-    await supabase.from('transactions').upsert({
-      donation_id: orderId,
-      midtrans_transaction_id: transactionId,
-      payment_method: paymentType,
-      payment_details: body,
-      transaction_time: new Date(transactionTime)
-    })
+    if (updateError) {
+      throw updateError
+    }
 
-    res.status(200).send('OK')
+    // If payment is completed, process rewards
+    if (status === 'completed') {
+      if (payment.type === 'points' && payment.points_amount) {
+        // Update user points
+        const { data: user, error: userError } = await supabaseClient
+          .from('users')
+          .select('total_points')
+          .eq('id', payment.user_id)
+          .single()
+
+        if (userError) {
+          throw userError
+        }
+
+        const newPoints = user.total_points + payment.points_amount
+
+        await supabaseClient
+          .from('users')
+          .update({ total_points: newPoints })
+          .eq('id', payment.user_id)
+
+      } else if (payment.type === 'subscription' && payment.subscription_months) {
+        // Create subscription record
+        const startDate = new Date()
+        const endDate = new Date()
+        endDate.setMonth(endDate.getMonth() + payment.subscription_months)
+
+        await supabaseClient
+          .from('subscriptions')
+          .insert([{
+            user_id: payment.user_id,
+            start_date: startDate.toISOString(),
+            end_date: endDate.toISOString()
+          }])
+      }
+    }
+
+    return new Response(
+      JSON.stringify({ success: true }),
+      { 
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: 200 
+      }
+    )
+
   } catch (error) {
     console.error('Webhook error:', error)
-    res.status(500).send('Error')
+    return new Response(
+      JSON.stringify({ error: error.message || 'Unknown error' }),
+      { 
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: 500 
+      }
+    )
   }
-})
-
-const port = process.env.PORT || 3000
-app.listen(port, () => {
-  console.log(`Webhook server listening on port ${port}`)
 })
