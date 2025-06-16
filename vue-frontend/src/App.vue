@@ -1,37 +1,74 @@
 <template>
-  <div class="min-h-screen bg-backgroundBlack text-white font-futuristic">
-    <header class="p-4 border-b border-neonPurple flex justify-between items-center">
-      <h1 class="text-3xl neon-text">{{ $t('welcome') }}</h1>
-      <select v-model="currentLocale" @change="changeLocale" class="bg-backgroundBlack text-white border border-neonPurple rounded px-2 py-1">
-        <option value="id">ID</option>
-        <option value="en">EN</option>
-      </select>
-    </header>
-    <main class="p-6">
-      <Home />
-    </main>
+  <div class="min-h-screen bg-backgroundBlack text-white">
+    <!-- Navigation -->
+    <nav v-if="authStore.isAuthenticated" class="bg-black/50 border-b border-neonPurple">
+      <div class="max-w-6xl mx-auto px-4 py-3">
+        <div class="flex justify-between items-center">
+          <div class="flex items-center space-x-8">
+            <router-link to="/" class="text-xl font-bold neon-text">
+              Snakehead Arena
+            </router-link>
+            <div class="flex space-x-4">
+              <router-link 
+                v-if="!authStore.isAdmin" 
+                to="/dashboard" 
+                class="hover:text-neonPurple transition-colors"
+              >
+                Dashboard
+              </router-link>
+              <router-link 
+                v-if="authStore.isAdmin" 
+                to="/admin" 
+                class="hover:text-neonPurple transition-colors"
+              >
+                Admin
+              </router-link>
+              <router-link 
+                to="/leaderboard" 
+                class="hover:text-neonPurple transition-colors"
+              >
+                Leaderboard
+              </router-link>
+            </div>
+          </div>
+          <div class="flex items-center space-x-4">
+            <span v-if="authStore.user" class="text-gray-400">
+              {{ authStore.user.email }}
+            </span>
+            <button 
+              @click="handleLogout" 
+              class="bg-neonPurple hover:bg-neonPink px-4 py-2 rounded neon-button"
+            >
+              Logout
+            </button>
+          </div>
+        </div>
+      </div>
+    </nav>
+
+    <!-- Main Content -->
+    <router-view></router-view>
   </div>
 </template>
 
 <script setup>
-import { ref } from 'vue'
-import { useI18n } from 'vue-i18n'
-import Home from './components/Home.vue'
+import { onMounted } from 'vue'
+import { useRouter } from 'vue-router'
+import { useAuthStore } from './stores/auth'
 
-const { locale } = useI18n()
-const currentLocale = ref(locale.value)
+const router = useRouter()
+const authStore = useAuthStore()
 
-function changeLocale() {
-  locale.value = currentLocale.value
+onMounted(async () => {
+  await authStore.initialize()
+})
+
+const handleLogout = async () => {
+  try {
+    await authStore.logout()
+    router.push('/login')
+  } catch (error) {
+    console.error('Logout error:', error)
+  }
 }
 </script>
-
-<style scoped>
-.neon-text {
-  text-shadow:
-    0 0 5px #9b59b6,
-    0 0 10px #9b59b6,
-    0 0 20px #9b59b6,
-    0 0 40px #9b59b6;
-}
-</style>
