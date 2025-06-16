@@ -5,6 +5,6 @@ export default defineConfig({
   plugins: [vue()],
   server: {
     port: 8000,
-    allowedHosts: ['4gxz64-8004.csb.app', 'localhost']
+    allowedHosts: ['4gxz64-8004.csb.app', '4gxz64-8000.csb.app', 'localhost']
   }
 })
